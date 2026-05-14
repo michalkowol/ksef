@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Faktury KSeF</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        html{font-size:14px;line-height:1.6em}
+        body{background:#fcfcfc;color:#545454;font-family:'Inter',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+        h1{color:#333;font-size:1.6em;font-weight:600;margin-bottom:.8em}
+        b{font-weight:700}
+
+        .note-wrapper{max-width:90em;margin:0 auto;padding:1.5em 3em}
+
+        .controls{display:flex;gap:1em;align-items:flex-end;flex-wrap:wrap;margin-bottom:1.5em}
+        .control{display:flex;flex-direction:column}
+        .control.grow{flex:1;min-width:18em}
+        .control label{font-size:.85em;color:#878787;margin-bottom:.2em;font-weight:500}
+        .control input{font:inherit;padding:.45em .6em;border:1px solid #dedede;background:#fff;color:#545454}
+        .control input:focus{outline:none;border-color:#de4c4f}
+
+        .btn{font:inherit;font-weight:600;padding:.55em 1.2em;border:0;background:#de4c4f;color:#fff;cursor:pointer}
+        .btn:hover{background:#c43a3d}
+        .btn:disabled{opacity:.5;cursor:not-allowed}
+
+        .table-wrap{overflow-x:auto}
+        table{width:100%;border-collapse:collapse;font-size:.9em}
+        th{font-weight:600;color:#333;text-align:left;border-bottom:2px solid #dedede;padding:.55em .5em;background:#fafafa;position:sticky;top:0}
+        td{padding:.35em .5em;border-bottom:1px solid #ededed;vertical-align:middle}
+        tbody tr:hover td{background:#fafafa}
+        td.num,td.date,td.ksef{font-family:'JetBrains Mono','Menlo','Consolas','Monaco',monospace;white-space:nowrap}
+        td.num{text-align:right}
+        td.ksef{font-size:.8em;color:#878787}
+        td.koszty{font-weight:600;color:#333}
+        td.check{text-align:center}
+        tfoot td{font-weight:600;color:#333;border-top:2px solid #dedede;border-bottom:none;padding:.6em .5em}
+
+        .summary-card{margin-top:1.5em;background:#fff;border:1px solid #dedede;padding:1em 1.2em;display:grid;grid-template-columns:repeat(auto-fit,minmax(10em,1fr));gap:1em}
+        .summary-card .item{display:flex;flex-direction:column;gap:.2em}
+        .summary-card .label{font-size:.85em;color:#878787;font-weight:500}
+        .summary-card .value{font-family:'JetBrains Mono','Menlo','Consolas','Monaco',monospace;color:#333;font-size:1.1em;font-weight:600}
+
+        .empty{color:#878787;font-style:italic;padding:.8em 0}
+        .error{color:#de4c4f;font-weight:600;padding:.8em 0}
+    </style>
+</head>
+<body>
+<div class="note-wrapper" x-data="invoiceApp()">
+    <h1>Faktury KSeF</h1>
+
+    <div class="controls">
+        <div class="control grow">
+            <label for="csvFile">Plik CSV</label>
+            <input type="file" id="csvFile" accept=".csv" @change="loadFile($event)">
+        </div>
+        <div class="control">
+            <button class="btn" @click="copyTsv()" :disabled="!rows.length" x-text="copyLabel">Kopiuj TSV</button>
+        </div>
+    </div>
+
+    <template x-if="error">
+        <div class="error" x-text="error"></div>
+    </template>
+
+    <template x-if="!error && !rows.length">
+        <div class="empty">Wybierz plik CSV z fakturami KSeF, aby zobaczyć tabelę.</div>
+    </template>
+
+    <template x-if="rows.length">
+        <div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Koszty</th>
+                        <th>Kategoria</th>
+                        <th>Data wystawienia</th>
+                        <th>Data płatności</th>
+                        <th style="text-align:right">Brutto</th>
+                        <th style="text-align:right">Netto</th>
+                        <th style="text-align:right">Koszt spółki</th>
+                        <th>Faktura</th>
+                        <th>Komentarz</th>
+                        <th style="text-align:center">Sprawdzenie</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <template x-for="(row, idx) in rows" :key="idx">
+                        <tr>
+                            <td class="koszty" x-text="row.koszty"></td>
+                            <td x-text="row.kategoria"></td>
+                            <td class="date" x-text="row.dataWystawienia"></td>
+                            <td class="date" x-text="row.dataPlatnosci"></td>
+                            <td class="num" x-text="row.brutto"></td>
+                            <td class="num" x-text="row.netto"></td>
+                            <td class="num" x-text="row.kosztSpolki"></td>
+                            <td class="ksef" x-text="row.faktura"></td>
+                            <td x-text="row.komentarz"></td>
+                            <td class="check" x-text="row.sprawdzenie"></td>
+                        </tr>
+                    </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="summary-card">
+                <div class="item"><span class="label">Wierszy</span><span class="value" x-text="rows.length"></span></div>
+                <div class="item"><span class="label">Brutto</span><span class="value" x-text="fmt(total('brutto'))"></span></div>
+                <div class="item"><span class="label">Netto</span><span class="value" x-text="fmt(total('netto'))"></span></div>
+                <div class="item"><span class="label">Koszt spółki</span><span class="value" x-text="fmt(total('kosztSpolki'))"></span></div>
+            </div>
+        </div>
+    </template>
+</div>
+
+<script>
+    const COLS = ['koszty', 'kategoria', 'dataWystawienia', 'dataPlatnosci', 'brutto', 'netto', 'kosztSpolki', 'faktura', 'komentarz', 'sprawdzenie'];
+
+    function splitCsv(line) {
+        const out = [];
+        let cur = '', inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') {
+                if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+                else inQuotes = !inQuotes;
+            } else if (ch === ';' && !inQuotes) {
+                out.push(cur); cur = '';
+            } else {
+                cur += ch;
+            }
+        }
+        out.push(cur);
+        return out;
+    }
+
+    function parseNum(s) {
+        if (!s) return 0;
+        const n = parseFloat(String(s).trim().replace(/\s/g, '').replace(',', '.'));
+        return isNaN(n) ? 0 : n;
+    }
+
+    function toIsoDate(s) {
+        const m = String(s || '').trim().match(/^(\d{2})-(\d{2})-(\d{4})/);
+        return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+    }
+
+    function shortenSeller(s) {
+        if (!s) return '';
+        return s.split(',')[0].trim()
+            .replace(/\b(Sp\.?\s*z\s*o\.?\s*o\.?|S\.?A\.?|SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ|SPÓŁKA AKCYJNA)\b\.?/gi, '')
+            .replace(/\s+/g, ' ').trim();
+    }
+
+    function invoiceApp() {
+        return {
+            rows: [],
+            error: '',
+            copyLabel: 'Kopiuj TSV',
+
+            loadFile(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => this.parseCsv(e.target.result);
+                reader.onerror = () => { this.error = 'Nie udało się odczytać pliku.'; };
+                reader.readAsText(file, 'utf-8');
+            },
+
+            parseCsv(text) {
+                this.error = '';
+                this.rows = [];
+                const lines = text.split(/\r?\n/).filter(l => l.trim());
+                if (lines.length < 2) {
+                    this.error = 'Plik CSV nie zawiera danych.';
+                    return;
+                }
+                const header = splitCsv(lines[0]);
+                const col = (name) => header.indexOf(name);
+                const iLp = col('Lp.');
+                const iSprzedawca = col('Sprzedawca');
+                const iData = col('Data wystawienia');
+                const iKsef = col('Numer KSeF');
+                const iNetto = col('Netto');
+                const iBrutto = col('Brutto');
+                if (iSprzedawca < 0 || iBrutto < 0) {
+                    this.error = 'Nie rozpoznano formatu CSV (brak kolumn Sprzedawca/Brutto).';
+                    return;
+                }
+                for (let i = 1; i < lines.length; i++) {
+                    const cells = splitCsv(lines[i]);
+                    if (isNaN(parseInt(cells[iLp]))) continue;
+                    this.rows.push({
+                        koszty: shortenSeller(cells[iSprzedawca]),
+                        kategoria: '',
+                        dataWystawienia: toIsoDate(cells[iData]),
+                        dataPlatnosci: '',
+                        brutto: this.fmt(parseNum(cells[iBrutto])),
+                        netto: this.fmt(parseNum(cells[iNetto])),
+                        kosztSpolki: '',
+                        faktura: (cells[iKsef] || '').trim(),
+                        komentarz: '',
+                        sprawdzenie: ''
+                    });
+                }
+                console.log('Loaded CSV [rows=' + this.rows.length + ']');
+            },
+
+            fmt(n) {
+                return n ? Number(n).toFixed(2) : '';
+            },
+
+            total(field) {
+                return this.rows.reduce((acc, r) => acc + parseNum(r[field]), 0);
+            },
+
+            copyTsv() {
+                const text = this.rows
+                    .map(r => COLS.map(c => String(r[c] ?? '').replace(/[\t\r\n]/g, ' ')).join('\t'))
+                    .join('\n');
+                navigator.clipboard.writeText(text).then(() => {
+                    this.copyLabel = 'Skopiowano';
+                    setTimeout(() => { this.copyLabel = 'Kopiuj TSV'; }, 1500);
+                }).catch(err => console.error('Failed to copy TSV [rows=' + this.rows.length + ']', err));
+            }
+        };
+    }
+</script>
+</body>
+</html>
