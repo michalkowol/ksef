@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Faktury KSeF</title>
+    <script defer src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
@@ -52,8 +53,8 @@
 
     <div class="controls">
         <div class="control grow">
-            <label for="csvFile">Plik CSV</label>
-            <input type="file" id="csvFile" accept=".csv" @change="loadFile($event)">
+            <label for="xlsxFile">Plik XLSX</label>
+            <input type="file" id="xlsxFile" accept=".xlsx" @change="loadFile($event)">
         </div>
         <div class="control">
             <button class="btn" @click="copyTsv()" :disabled="!rows.length" x-text="copyLabel">Kopiuj TSV</button>
@@ -65,7 +66,7 @@
     </template>
 
     <template x-if="!error && !rows.length">
-        <div class="empty">Wybierz plik CSV z fakturami KSeF, aby zobaczyć tabelę.</div>
+        <div class="empty">Wybierz plik XLSX z fakturami KSeF, aby zobaczyć tabelę.</div>
     </template>
 
     <template x-if="rows.length">
@@ -118,38 +119,29 @@
 <script>
     const COLS = ['koszty', 'kategoria', 'dataWystawienia', 'dataPlatnosci', 'brutto', 'netto', 'kosztSpolki', 'faktura', 'komentarz', 'sprawdzenie'];
 
-    function splitCsv(line) {
-        const out = [];
-        let cur = '', inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-            const ch = line[i];
-            if (ch === '"') {
-                if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
-                else inQuotes = !inQuotes;
-            } else if (ch === ';' && !inQuotes) {
-                out.push(cur); cur = '';
-            } else {
-                cur += ch;
-            }
-        }
-        out.push(cur);
-        return out;
-    }
-
     function parseNum(s) {
-        if (!s) return 0;
+        if (s === null || s === undefined || s === '') return 0;
+        if (typeof s === 'number') return isNaN(s) ? 0 : s;
         const n = parseFloat(String(s).trim().replace(/\s/g, '').replace(',', '.'));
         return isNaN(n) ? 0 : n;
     }
 
-    function toIsoDate(s) {
-        const m = String(s || '').trim().match(/^(\d{2})-(\d{2})-(\d{4})/);
-        return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+    function excelDateToIso(v) {
+        if (v === null || v === undefined || v === '') return '';
+        const serial = typeof v === 'number' ? v : parseFloat(v);
+        if (isNaN(serial) || serial <= 0) return '';
+        const ms = Math.round((serial - 25569) * 86400) * 1000;
+        const d = new Date(ms);
+        if (isNaN(d.getTime())) return '';
+        const yyyy = d.getUTCFullYear();
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
     }
 
     function shortenSeller(s) {
         if (!s) return '';
-        return s.split(',')[0].trim()
+        return String(s).split(',')[0].trim()
             .replace(/\b(Sp\.?\s*z\s*o\.?\s*o\.?|S\.?A\.?|SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ|SPÓŁKA AKCYJNA)\b\.?/gi, '')
             .replace(/\s+/g, ' ').trim();
     }
@@ -164,48 +156,84 @@
                 const file = event.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = (e) => this.parseCsv(e.target.result);
+                reader.onload = (e) => this.parseXlsx(e.target.result);
                 reader.onerror = () => { this.error = 'Nie udało się odczytać pliku.'; };
-                reader.readAsText(file, 'utf-8');
+                reader.readAsArrayBuffer(file);
             },
 
-            parseCsv(text) {
+            parseXlsx(buffer) {
                 this.error = '';
                 this.rows = [];
-                const lines = text.split(/\r?\n/).filter(l => l.trim());
-                if (lines.length < 2) {
-                    this.error = 'Plik CSV nie zawiera danych.';
+                let wb;
+                try {
+                    wb = XLSX.read(buffer, { type: 'array' });
+                } catch (err) {
+                    this.error = 'Nie udało się odczytać pliku XLSX.';
+                    console.error('Failed to read XLSX [name=]', err);
                     return;
                 }
-                const header = splitCsv(lines[0]);
-                const col = (name) => header.indexOf(name);
-                const iLp = col('Lp.');
-                const iSprzedawca = col('Sprzedawca');
-                const iData = col('Data wystawienia');
-                const iKsef = col('Numer KSeF');
-                const iNetto = col('Netto');
-                const iBrutto = col('Brutto');
-                if (iSprzedawca < 0 || iBrutto < 0) {
-                    this.error = 'Nie rozpoznano formatu CSV (brak kolumn Sprzedawca/Brutto).';
+                const sheet = wb.Sheets['Faktury'] || wb.Sheets[wb.SheetNames[0]];
+                if (!sheet) {
+                    this.error = 'Plik XLSX nie zawiera arkuszy.';
                     return;
                 }
-                for (let i = 1; i < lines.length; i++) {
-                    const cells = splitCsv(lines[i]);
-                    if (isNaN(parseInt(cells[iLp]))) continue;
+                const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
+
+                let headerIdx = -1;
+                for (let i = 0; i < aoa.length; i++) {
+                    const row = aoa[i] || [];
+                    if (row.includes('Lp') && row.includes('Numer KSeF')) { headerIdx = i; break; }
+                }
+                if (headerIdx < 0) {
+                    this.error = 'Nie rozpoznano formatu XLSX (brak nagłówków Lp/Numer KSeF).';
+                    return;
+                }
+
+                const header = aoa[headerIdx];
+                const idx = (name) => header.indexOf(name);
+                const iLp = idx('Lp');
+                const iKod = idx('Kod Kontrahenta');
+                const iKontrahent = idx('Kontrahent');
+                const iDataWyst = idx('Data wystawienia');
+                const iTermin = idx('Termin płatności');
+                const iKsef = idx('Numer KSeF');
+
+                const nettoCols = [];
+                const vatCols = [];
+                header.forEach((h, i) => {
+                    const s = String(h || '');
+                    if (s === 'Wartość bez VAT' || (s.startsWith('Wartość netto ') && s !== 'Wartość netto')) {
+                        nettoCols.push(i);
+                    } else if (s.startsWith('VAT ') && s !== 'VAT') {
+                        vatCols.push(i);
+                    }
+                });
+
+                if (iKontrahent < 0 || iKsef < 0 || !nettoCols.length) {
+                    this.error = 'Nie rozpoznano formatu XLSX (brak wymaganych kolumn).';
+                    return;
+                }
+
+                for (let i = headerIdx + 1; i < aoa.length; i++) {
+                    const row = aoa[i] || [];
+                    if (typeof row[iLp] !== 'number') continue;
+                    const netto = nettoCols.reduce((acc, j) => acc + parseNum(row[j]), 0);
+                    const vat = vatCols.reduce((acc, j) => acc + parseNum(row[j]), 0);
+                    const brutto = netto + vat;
                     this.rows.push({
-                        koszty: shortenSeller(cells[iSprzedawca]),
+                        koszty: shortenSeller(row[iKod] || row[iKontrahent]),
                         kategoria: '',
-                        dataWystawienia: toIsoDate(cells[iData]),
-                        dataPlatnosci: '',
-                        brutto: this.fmt(parseNum(cells[iBrutto])),
-                        netto: this.fmt(parseNum(cells[iNetto])),
+                        dataWystawienia: excelDateToIso(row[iDataWyst]),
+                        dataPlatnosci: excelDateToIso(row[iTermin]),
+                        brutto: this.fmt(brutto),
+                        netto: this.fmt(netto),
                         kosztSpolki: '',
-                        faktura: (cells[iKsef] || '').trim(),
+                        faktura: String(row[iKsef] || '').trim(),
                         komentarz: '',
                         sprawdzenie: ''
                     });
                 }
-                console.log('Loaded CSV [rows=' + this.rows.length + ']');
+                console.log('Loaded XLSX [rows=' + this.rows.length + ']');
             },
 
             fmt(n) {
