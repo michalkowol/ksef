@@ -139,6 +139,16 @@
         return `${yyyy}-${mm}-${dd}`;
     }
 
+    function kategoriaFromKomentarz(komentarz) {
+        if (!komentarz) return '';
+        const k = String(komentarz).toLowerCase();
+        if (k.includes('bawiarenka') || k.includes('kasia')) return 'Bawiarenka';
+        if (k.includes('michał') || k.includes('michal')) return 'Michał';
+        if (k.includes('krzysztof')) return 'Krzysztof';
+        if (k.includes('codeloop')) return 'Codeloop';
+        return '';
+    }
+
     function shortenSeller(s) {
         if (!s) return '';
         return String(s).split(',')[0].trim()
@@ -197,6 +207,7 @@
                 const iDataWyst = idx('Data wystawienia');
                 const iTermin = idx('Termin płatności');
                 const iKsef = idx('Numer KSeF');
+                const iKomentarz = idx('Ostatni komentarz');
 
                 const nettoCols = [];
                 const vatCols = [];
@@ -220,16 +231,17 @@
                     const netto = nettoCols.reduce((acc, j) => acc + parseNum(row[j]), 0);
                     const vat = vatCols.reduce((acc, j) => acc + parseNum(row[j]), 0);
                     const brutto = netto + vat;
+                    const komentarz = iKomentarz >= 0 ? String(row[iKomentarz] || '').trim() : '';
                     this.rows.push({
                         koszty: shortenSeller(row[iKod] || row[iKontrahent]),
-                        kategoria: '',
+                        kategoria: kategoriaFromKomentarz(komentarz),
                         dataWystawienia: excelDateToIso(row[iDataWyst]),
                         dataPlatnosci: excelDateToIso(row[iTermin]),
                         brutto: this.fmt(brutto),
                         netto: this.fmt(netto),
                         kosztSpolki: '',
                         faktura: String(row[iKsef] || '').trim(),
-                        komentarz: '',
+                        komentarz: komentarz,
                         sprawdzenie: ''
                     });
                 }
