@@ -142,11 +142,12 @@
     function kategoriaFromKomentarz(komentarz) {
         if (!komentarz) return '';
         const k = String(komentarz).toLowerCase();
-        if (k.includes('bawiarenka') || k.includes('kasia')) return 'Bawiarenka';
-        if (k.includes('michał') || k.includes('michal')) return 'Michał';
-        if (k.includes('krzysztof')) return 'Krzysztof';
-        if (k.includes('codeloop')) return 'Codeloop';
-        return '';
+        const matches = [];
+        if (k.includes('bawiarenka') || k.includes('kasia')) matches.push('Bawiarenka');
+        if (k.includes('michał') || k.includes('michal')) matches.push('Michał');
+        if (k.includes('krzysztof')) matches.push('Krzysztof');
+        if (k.includes('codeloop')) matches.push('Codeloop');
+        return matches.length === 1 ? matches[0] : '';
     }
 
     function shortenSeller(s) {
